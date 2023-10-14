@@ -52,6 +52,10 @@ fn update_player_animation(mut query: Query<&mut PlayerState>, keys: Res<Input<K
             // this will take us through walking in the animation graph
             *state = PlayerState::Running;
         }
+        if keys.just_released(KeyCode::D) {
+            // this will take us through walking in the animation graph
+            *state = PlayerState::Idle;
+        }
     }
 }
 
@@ -59,25 +63,25 @@ fn spawn_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
 }
 
-fn spawn_player(mut commands: Commands, animation_data: Res<PlayerAnimationGraphResource>) {
+fn spawn_player(mut commands: Commands, animation_graph: Res<SpriteAnimationGraph<PlayerState>>) {
     // display sprite to be used. This will be updated automatically as the animation state changes.
+    let initial_vertex = animation_graph.get_vertex(&PlayerState::Idle);
+    let animation = SpriteAnimation::new(initial_vertex, 1. / 8.);
+
     let sprite_bundle = SpriteSheetBundle {
         sprite: TextureAtlasSprite {
             custom_size: { Some(Vec2 { x: 128., y: 128. }) },
             ..default()
         },
-        texture_atlas: animation_data.animation_graph.get_atlas().clone(),
+        texture_atlas: animation_graph.get_atlas(initial_vertex).clone(),
         ..default()
     };
 
-    let animation = SpriteAnimation {
-        timer: Timer::from_seconds(1. / 20., TimerMode::Once),
-        animation_graph: animation_data.animation_graph.copy_from_resource(),
+    let animation_bundle = SpriteAnimationBundle {
+        animation: animation,
+        state: animation_graph.get_state(initial_vertex).clone(),
+        sprite_bundle: sprite_bundle,
     };
-    commands.spawn((
-        Player,
-        animation_data.animation_graph.state,
-        sprite_bundle,
-        animation,
-    ));
+
+    commands.spawn((Player, animation_bundle));
 }

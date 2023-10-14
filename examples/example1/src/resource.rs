@@ -19,80 +19,63 @@ pub enum PlayerState {
 /// In fact, it only need run once, but must do so AFTER the PlayerAtlasResource has been loaded.
 /// In later versions of this package we will create a macro that should handle most of what is in this file.
 pub fn create_player_animation_graph(world: &mut World) {
-    world.insert_resource(PlayerAnimationGraphResource::from_world(world));
-}
+    let atlases = world.resource::<PlayerAtlasResource>();
 
-#[derive(Resource, Debug)]
-pub struct PlayerAnimationGraphResource {
-    // idle: SpriteAnimationNode<PlayerState>,
-    // blinking: SpriteAnimationNode<PlayerState>,
-    // head_turn: SpriteAnimationNode<PlayerState>,
-    // walking: SpriteAnimationNode<PlayerState>,
-    // running: SpriteAnimationNode<PlayerState>,
-    // shooting: SpriteAnimationNode<PlayerState>,
-    // stabbing: SpriteAnimationNode<PlayerState>,
-    pub animation_graph: SpriteAnimationGraph<PlayerState>,
-}
+    // frame_count can be used if the Atlas does not contain sprites for every tile. i.e. frame_count <= columns * rows
+    let idle_data = SegmentData {
+        frame_interval: (0, 9),
+        segment_behaviour: SegmentBehaviour::Forward,
+        texture_atlas_handle: atlases.idle.clone(),
+    };
+    let walking_data = SegmentData {
+        frame_interval: (0, 7),
+        segment_behaviour: SegmentBehaviour::Forward,
+        texture_atlas_handle: atlases.walking.clone(),
+    };
+    let running_data = SegmentData {
+        frame_interval: (0, 7),
+        segment_behaviour: SegmentBehaviour::Forward,
+        texture_atlas_handle: atlases.running.clone(),
+    };
 
-impl PlayerAnimationGraphResource {
-    // this is not the same as impl FromWorld, we dont need a mutable ref to World.
-    // Because this depends on PlayerAtlasResource which is loaded by bevy_assert_loader,
-    // this should be called when the game enters GameState::Running (or exits GameState::Loading) to ensure PlayerAtlasResource exists.
-    // See [`create_player_animation_graph`] above.
-    fn from_world(world: &World) -> Self {
-        let atlases = world.resource::<PlayerAtlasResource>();
+    let landing_data = SegmentData {
+        frame_interval: (0, 8),
+        segment_behaviour: SegmentBehaviour::Forward,
+        texture_atlas_handle: atlases.landing.clone(),
+    };
 
-        // frame_count can be used if the Atlas does not contain sprites for every tile. i.e. frame_count <= columns * rows
-        let idle = SpriteAnimationNode {
-            state: PlayerState::Idle,
-            loop_behaviour: LoopBehaviour::Repeat,
-            frame_count: 10,
-            atlas: atlases.idle.clone(),
-        };
-        let walking = SpriteAnimationNode {
-            state: PlayerState::Walking,
-            loop_behaviour: LoopBehaviour::Repeat,
-            frame_count: 8,
-            atlas: atlases.walking.clone(),
-        };
-        let running = SpriteAnimationNode {
-            state: PlayerState::Running,
-            loop_behaviour: LoopBehaviour::Repeat,
-            frame_count: 8,
-            atlas: atlases.running.clone(),
-        };
-        let landing = SpriteAnimationNode {
-            state: PlayerState::Landing,
-            loop_behaviour: LoopBehaviour::Repeat,
-            frame_count: 9,
-            atlas: atlases.landing.clone(),
-        };
-        let jumping = SpriteAnimationNode {
-            state: PlayerState::Jumping,
-            loop_behaviour: LoopBehaviour::Stop, // this means the animation will stop at the last frame.
-            frame_count: 3,
-            atlas: atlases.jumping.clone(),
-        };
+    let jumping_data = SegmentData {
+        frame_interval: (0, 2),
+        segment_behaviour: SegmentBehaviour::Forward,
+        texture_atlas_handle: atlases.jumping.clone(),
+    };
 
-        let mut animation_graph = SpriteAnimationGraph::new(&idle.state);
+    let mut animation_graph = SpriteAnimationGraph::new();
 
-        let v_idle = animation_graph.add_animation_node(idle);
-        let v_walking = animation_graph.add_animation_node(walking);
-        let v_running = animation_graph.add_animation_node(running);
-        let v_landing = animation_graph.add_animation_node(landing);
-        let v_jumping = animation_graph.add_animation_node(jumping);
+    let v_idle = animation_graph.add_state(PlayerState::Idle, idle_data);
+    let v_walking = animation_graph.add_state(PlayerState::Walking, walking_data);
+    let v_running = animation_graph.add_state(PlayerState::Running, running_data);
+    let v_landing = animation_graph.add_state(PlayerState::Landing, landing_data);
+    let v_jumping = animation_graph.add_state(PlayerState::Jumping, jumping_data);
 
-        // animation_graph.add_edge(v_idle, v_blinking);
-        // animation_graph.add_edge(v_blinking, v_idle);
-        // animation_graph.add_edge(v_idle, v_head_turn);
-        // animation_graph.add_edge(v_head_turn, v_idle);
+    // transition data defaults to immediately transitioning to the next state and jumping to the first frame of the segment.
+    // this is what we want when transitioning from the idle state.
+    animation_graph.add_transition((v_idle, v_jumping), TransitionData::default());
+    animation_graph.add_transition((v_idle, v_walking), TransitionData::default());
+    // a self-transition is included that defines how to loop on the same segment. Below will just loop normally
+    // note that default should not be used here, otherwise the transition will be immediate and it will seem
+    // as though the animation is not running (it will always be immediately returning to the first frame)
+    animation_graph.add_transition((v_idle, v_idle), TransitionData::looping());
 
-        // TODO lets do the others
+    animation_graph.add_transition((v_walking, v_idle), TransitionData::wait());
+    animation_graph.add_transition((v_walking, v_walking), TransitionData::looping());
 
-        return PlayerAnimationGraphResource {
-            animation_graph: animation_graph,
-        };
-    }
+    animation_graph.add_transition((v_walking, v_running), TransitionData::wait());
+
+    animation_graph.add_transition((v_running, v_running), TransitionData::looping());
+    animation_graph.add_transition((v_running, v_walking), TransitionData::wait());
+
+    world.insert_resource(animation_graph);
 }
 
 /// this atlas resource will be used to intialise the player animation graph
