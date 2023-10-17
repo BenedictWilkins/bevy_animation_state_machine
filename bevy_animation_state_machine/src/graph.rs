@@ -1,8 +1,5 @@
-use indexmap::map::IndexMap;
-use std::any::Any;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
-use std::hash::Hash;
 
 #[derive(Debug)]
 pub enum GraphError {
@@ -10,93 +7,77 @@ pub enum GraphError {
 }
 
 pub type Vertex = usize;
+pub type Edge = (Vertex, Vertex);
 
 #[derive(Debug, Clone)]
-pub struct Graph<S: Hash + Eq + PartialEq + Debug> {
-    pub(crate) edges: HashMap<Vertex, HashSet<Vertex>>,
-    pub(crate) verticies: IndexMap<S, Vertex>,
+pub struct Graph<V, E> {
+    edges: HashMap<Edge, E>,   // Metadata for edges
+    verts: HashMap<Vertex, V>, // Metadata for vertices
+    adjacency: HashMap<Vertex, HashSet<Vertex>>,
 }
 
-impl<S: Hash + Eq + PartialEq + Debug> Graph<S> {
+impl<V, E> Graph<V, E> {
     pub fn new() -> Self {
         Graph {
             edges: HashMap::new(),
-            verticies: IndexMap::new(),
+            verts: HashMap::new(),
+            adjacency: HashMap::new(),
         }
     }
 
-    pub(crate) fn from_data(
-        verts: IndexMap<S, Vertex>,
-        edges: HashMap<Vertex, HashSet<Vertex>>,
-    ) -> Graph<S> {
-        // assume that verts and edges have matching vertex data...
-        return Graph {
-            edges: edges,
-            verticies: verts,
-        };
+    pub fn get_vertex_metadata(&self, vertex: Vertex) -> Option<&V> {
+        self.verts.get(&vertex)
     }
 
-    pub fn get_vertex(&self, state: &S) -> Option<&Vertex> {
-        return self.verticies.get(state);
+    pub fn get_edge_metadata(&self, edge: (Vertex, Vertex)) -> Option<&E> {
+        self.edges.get(&edge)
     }
 
-    pub fn get_state(&self, vertex: Vertex) -> Option<&S> {
-        let entry = self.verticies.get_index(vertex)?;
-        return Some(entry.0);
+    pub fn add_node(&mut self, node: Vertex, metadata: V) {
+        self.verts.insert(node, metadata);
+        self.adjacency.insert(node, HashSet::new());
     }
 
-    pub fn get_states(&self, path: &Vec<Vertex>) -> Vec<&S> {
-        return path.iter().map(|x| self.get_state(*x).unwrap()).collect();
-    }
+    pub fn add_edge(&mut self, edge: (Vertex, Vertex), metadata: E) {
+        if !self.verts.contains_key(&edge.0) {
+            panic!("Vertex {} not found", edge.0);
+        }
+        if !self.verts.contains_key(&edge.1) {
+            panic!("Vertex {} not found", edge.1);
+        }
 
-    pub fn add_vertex(&mut self, state: S) -> Vertex {
-        if !self.verticies.contains_key(&state) {
-            let index = self.verticies.len();
-            let (actual_index, _) = self.verticies.insert_full(state, index);
-            assert!(index == actual_index); // sanity check...
-            return index;
-        } else {
-            return *self.verticies.get(&state).unwrap();
+        self.edges.insert(edge, metadata);
+        if let Some(neighbors) = self.adjacency.get_mut(&edge.0) {
+            neighbors.insert(edge.1);
         }
     }
 
-    pub fn add_edge(&mut self, state1: &S, state2: &S) -> (Vertex, Vertex) {
-        let v1 = *self.verticies.get(state1).unwrap();
-        let v2 = *self.verticies.get(state2).unwrap();
-        self.add_vertex_edge(v1, v2);
-        return (v1, v2);
-    }
+    pub fn shortest_path(&self, start: Vertex, end: Vertex) -> Result<Vec<Vertex>, GraphError> {
+        if !self.verts.contains_key(&start) || !self.verts.contains_key(&end) {
+            return Err(GraphError::NoSuchPath(format!(
+                "Either vertex {} or {} doesn't exist.",
+                start, end
+            )));
+        }
 
-    pub fn add_vertex_edge(&mut self, v1: Vertex, v2: Vertex) {
-        self.edges.entry(v1).or_default().insert(v2);
-    }
-
-    pub fn shortest_path(&self, start: &S, end: &S) -> Result<Vec<&S>, GraphError> {
-        let v1 = *self.verticies.get(start).unwrap();
-        let v2 = *self.verticies.get(end).unwrap();
-        let path = self._shortest_path(v1, v2)?;
-        return Ok(self.get_states(&path));
-    }
-
-    pub(crate) fn _shortest_path(&self, v1: Vertex, v2: Vertex) -> Result<Vec<Vertex>, GraphError> {
         let mut visited = HashSet::new();
         let mut queue = VecDeque::new();
-        let mut predecessors = HashMap::new();
+        let mut predecessors: HashMap<Vertex, Vertex> = HashMap::new();
 
-        visited.insert(v1);
-        queue.push_back(v1);
+        visited.insert(start);
+        queue.push_back(start);
 
         while let Some(current) = queue.pop_front() {
-            if current == v2 {
-                let mut path = vec![v2];
+            if current == end {
+                let mut path = vec![end];
                 while let Some(&node) = predecessors.get(&path[path.len() - 1]) {
                     path.push(node);
                 }
-                path.reverse();
+                //path.reverse();
                 return Ok(path);
             }
 
-            if let Some(neighbors) = self.edges.get(&current) {
+            if let Some(neighbors) = self.adjacency.get(&current) {
                 for &neighbor in neighbors {
                     if !visited.contains(&neighbor) {
                         visited.insert(neighbor);
@@ -107,47 +88,15 @@ impl<S: Hash + Eq + PartialEq + Debug> Graph<S> {
             }
         }
 
-        return Err(GraphError::NoSuchPath(format!(
-            "No path exists between states {:?} and {:?} in animation graph.",
-            self.get_state(v1),
-            self.get_state(v2)
-        )));
+        Err(GraphError::NoSuchPath(format!(
+            "No path exists between vertex {} and {}.",
+            start, end
+        )))
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_graph_basic() {
-        let mut graph: Graph<&str> = Graph::new();
-
-        assert_eq!(graph.add_vertex("A"), 0);
-        assert_eq!(graph.add_vertex("B"), 1);
-        assert_eq!(graph.add_vertex("C"), 2);
-        assert_eq!(graph.add_vertex("C"), 2);
-        assert_eq!(graph.add_edge(&"A", &"B"), (0, 1));
-        assert_eq!(graph.add_edge(&"B", &"C"), (1, 2));
-
-        // Test vertex retrieval
-        assert_eq!(graph.get_vertex(&"A"), Some(&0));
-        assert_eq!(graph.get_vertex(&"B"), Some(&1));
-        assert_eq!(graph.get_vertex(&"C"), Some(&2));
-
-        // Test state retrieval
-        assert_eq!(graph.get_state(0), Some(&"A"));
-        assert_eq!(graph.get_state(1), Some(&"B"));
-        assert_eq!(graph.get_state(2), Some(&"C"));
-
-        // Test shortest_path
-        let path_ab = graph.shortest_path(&"A", &"B").unwrap();
-        assert_eq!(path_ab, vec![&"A", &"B"]);
-
-        let path_ac = graph.shortest_path(&"A", &"C").unwrap();
-        assert_eq!(path_ac, vec![&"A", &"B", &"C"]);
-
-        let path_ca = graph.shortest_path(&"C", &"A");
-        assert!(path_ca.is_err());
+    pub fn contains_vertex(&self, vertex: Vertex) -> bool {
+        return self.adjacency.contains_key(&vertex);
     }
+
+    // Add methods for querying and modifying the graph as needed.
 }

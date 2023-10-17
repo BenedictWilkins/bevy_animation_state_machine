@@ -12,8 +12,22 @@ pub enum GameState {
 
 mod resource;
 
-#[derive(Component)]
-pub struct Player;
+#[derive(Component, Debug)]
+pub struct Player {
+    speed: f32, // used to determine when to play jumping/landing animations.
+}
+
+impl Default for Player {
+    fn default() -> Self {
+        Self { speed: 200.0 }
+    }
+}
+
+impl Player {
+    const MAX_HEIGHT: f32 = 100.; // max jump height
+    const MIN_HEIGHT: f32 = 40.; // min jump level
+    const GROUND_LEVEL: f32 = 0.;
+}
 
 fn main() {
     App::new()
@@ -38,23 +52,85 @@ fn main() {
         .run();
 }
 
-fn update_player_animation(mut query: Query<&mut PlayerState>, keys: Res<Input<KeyCode>>) {
+fn update_player_animation(
+    mut query: Query<(&mut PlayerState, &Player, &mut Transform)>,
+    keys: Res<Input<KeyCode>>,
+    time: Res<Time>,
+) {
     // change the state of the player depending on user input
-    for mut state in &mut query {
-        if keys.just_pressed(KeyCode::Space) {
-            // start jumping!
-            *state = PlayerState::Jumping;
-        }
-        if keys.just_released(KeyCode::Space) {
-            // stop jumping
-        }
-        if keys.just_pressed(KeyCode::D) {
-            // this will take us through walking in the animation graph
-            *state = PlayerState::Running;
-        }
-        if keys.just_released(KeyCode::D) {
-            // this will take us through walking in the animation graph
-            *state = PlayerState::Idle;
+    for (mut state, player, mut transform) in &mut query {
+        //println!("{:?}", state);
+        // if keys.pressed(KeyCode::W) && *state != PlayerState::JumpingDown {
+        //     // start jumping!
+        //     *state = PlayerState::JumpingUp;
+        // }
+        // if !keys.pressed(KeyCode::W)
+        //     && *state == PlayerState::JumpingUp
+        //     && transform.translation[1] > Player::MIN_HEIGHT
+        // {
+        //     // stop jumping
+        //     *state = PlayerState::JumpingDown;
+        // }
+        //println!("{:?}", state);
+        if *state == PlayerState::Idle {
+            // transitions from idle -> JumpingUp, Running
+            if keys.pressed(KeyCode::W) {
+                *state = PlayerState::JumpingUp;
+            } else if keys.pressed(KeyCode::D) {
+                *state = PlayerState::Running;
+            } else {
+                *state = PlayerState::Idle;
+            }
+        } else if *state == PlayerState::JumpingUp {
+            // transitions from JumpingUp -> JumpingMax, JumpingDown
+            // update player position
+            transform.translation[1] += player.speed * time.delta_seconds();
+
+            if keys.pressed(KeyCode::W) && transform.translation[1] < Player::MAX_HEIGHT {
+                *state = PlayerState::JumpingUp; // still jumping up
+            } else if keys.pressed(KeyCode::W) && transform.translation[1] > Player::MAX_HEIGHT {
+                transform.translation[1] = Player::MAX_HEIGHT;
+                *state = PlayerState::JumpingDown; // this will go via JumpingMax in the animation graph.
+            } else if !keys.pressed(KeyCode::W) && transform.translation[1] > Player::MIN_HEIGHT {
+                // player is no longer jumping and has gone passed the min height
+                *state = PlayerState::JumpingDown;
+            } else {
+                // player is no longer jumping but has not gone passed the min height yet, keep going up!
+                *state = PlayerState::JumpingUp;
+            }
+        } else if *state == PlayerState::JumpingDown {
+            transform.translation[1] -= 1.5 * player.speed * time.delta_seconds();
+
+            if transform.translation[1] > Player::GROUND_LEVEL {
+                *state = PlayerState::JumpingDown;
+            } else {
+                transform.translation[1] = Player::GROUND_LEVEL;
+                // player is at ground level, decide what to do based on current input
+                if keys.pressed(KeyCode::W) {
+                    *state = PlayerState::JumpingUp;
+                } else if keys.pressed(KeyCode::D) {
+                    *state = PlayerState::Rolling;
+                } else {
+                    *state = PlayerState::Landing;
+                }
+            }
+        } else if *state == PlayerState::Running {
+            if keys.pressed(KeyCode::W) {
+                *state = PlayerState::JumpingUp;
+            } else if keys.pressed(KeyCode::D) {
+                *state = PlayerState::Running; // keep running
+            } else {
+                *state = PlayerState::Idle;
+            }
+        } else if *state == PlayerState::Rolling {
+            *state = PlayerState::Running; // keep running
+        } else if *state == PlayerState::Landing {
+            // the player is currently landing, decide what to do based on current input
+            if keys.pressed(KeyCode::W) {
+                *state = PlayerState::JumpingUp;
+            } else {
+                *state = PlayerState::Idle;
+            }
         }
     }
 }
@@ -83,5 +159,5 @@ fn spawn_player(mut commands: Commands, animation_graph: Res<SpriteAnimationGrap
         sprite_bundle: sprite_bundle,
     };
 
-    commands.spawn((Player, animation_bundle));
+    commands.spawn((Player::default(), animation_bundle));
 }

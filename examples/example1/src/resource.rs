@@ -9,8 +9,11 @@ pub enum PlayerState {
     Idle,
     Walking,
     Running,
-    Jumping,
+    JumpingUp,
+    JumpingMax,
+    JumpingDown,
     Landing,
+    Rolling,
     // Shooting,
     // Stabbing,
 }
@@ -23,29 +26,48 @@ pub fn create_player_animation_graph(world: &mut World) {
 
     // frame_count can be used if the Atlas does not contain sprites for every tile. i.e. frame_count <= columns * rows
     let idle_data = SegmentData {
-        frame_interval: (0, 9),
+        segment_interval: SegmentInterval::new(0, 10),
         segment_behaviour: SegmentBehaviour::Forward,
         texture_atlas_handle: atlases.idle.clone(),
     };
     let walking_data = SegmentData {
-        frame_interval: (0, 7),
+        segment_interval: SegmentInterval::new(0, 8),
         segment_behaviour: SegmentBehaviour::Forward,
         texture_atlas_handle: atlases.walking.clone(),
     };
+
+    let rolling_data = SegmentData {
+        segment_interval: SegmentInterval::new(0, 7),
+        segment_behaviour: SegmentBehaviour::Forward,
+        texture_atlas_handle: atlases.rolling.clone(),
+    };
+
     let running_data = SegmentData {
-        frame_interval: (0, 7),
+        segment_interval: SegmentInterval::new(0, 8),
         segment_behaviour: SegmentBehaviour::Forward,
         texture_atlas_handle: atlases.running.clone(),
     };
-
+    // chunk out most of the landing frames
     let landing_data = SegmentData {
-        frame_interval: (0, 8),
+        segment_interval: SegmentInterval::new(0, 3),
         segment_behaviour: SegmentBehaviour::Forward,
         texture_atlas_handle: atlases.landing.clone(),
     };
 
-    let jumping_data = SegmentData {
-        frame_interval: (0, 2),
+    let jumping_up_data = SegmentData {
+        segment_interval: SegmentInterval::new(0, 1),
+        segment_behaviour: SegmentBehaviour::Forward,
+        texture_atlas_handle: atlases.jumping.clone(),
+    };
+
+    let jumping_max_data = SegmentData {
+        segment_interval: SegmentInterval::new(1, 1),
+        segment_behaviour: SegmentBehaviour::Forward,
+        texture_atlas_handle: atlases.jumping.clone(),
+    };
+
+    let jumping_down_data = SegmentData {
+        segment_interval: SegmentInterval::new(2, 1),
         segment_behaviour: SegmentBehaviour::Forward,
         texture_atlas_handle: atlases.jumping.clone(),
     };
@@ -53,27 +75,74 @@ pub fn create_player_animation_graph(world: &mut World) {
     let mut animation_graph = SpriteAnimationGraph::new();
 
     let v_idle = animation_graph.add_state(PlayerState::Idle, idle_data);
-    let v_walking = animation_graph.add_state(PlayerState::Walking, walking_data);
     let v_running = animation_graph.add_state(PlayerState::Running, running_data);
     let v_landing = animation_graph.add_state(PlayerState::Landing, landing_data);
-    let v_jumping = animation_graph.add_state(PlayerState::Jumping, jumping_data);
 
-    // transition data defaults to immediately transitioning to the next state and jumping to the first frame of the segment.
-    // this is what we want when transitioning from the idle state.
-    animation_graph.add_transition((v_idle, v_jumping), TransitionData::default());
-    animation_graph.add_transition((v_idle, v_walking), TransitionData::default());
-    // a self-transition is included that defines how to loop on the same segment. Below will just loop normally
-    // note that default should not be used here, otherwise the transition will be immediate and it will seem
-    // as though the animation is not running (it will always be immediately returning to the first frame)
-    animation_graph.add_transition((v_idle, v_idle), TransitionData::looping());
+    let v_jumping_up = animation_graph.add_state(PlayerState::JumpingUp, jumping_up_data);
+    let v_jumping_max = animation_graph.add_state(PlayerState::JumpingMax, jumping_max_data);
+    let v_jumping_down = animation_graph.add_state(PlayerState::JumpingDown, jumping_down_data);
 
-    animation_graph.add_transition((v_walking, v_idle), TransitionData::wait());
-    animation_graph.add_transition((v_walking, v_walking), TransitionData::looping());
+    let v_rolling = animation_graph.add_state(PlayerState::Rolling, rolling_data);
 
-    animation_graph.add_transition((v_walking, v_running), TransitionData::wait());
+    // idle transitions
+    // a self-transition is included that specifies how to loop on the same segment.
+    animation_graph.add_transition((v_idle, v_idle), TransitionData::wait());
 
-    animation_graph.add_transition((v_running, v_running), TransitionData::looping());
-    animation_graph.add_transition((v_running, v_walking), TransitionData::wait());
+    // running transitions
+    animation_graph.add_transition((v_running, v_running), TransitionData::wait());
+    animation_graph.add_transition((v_running, v_idle), TransitionData::wait_for(3));
+    animation_graph.add_transition((v_idle, v_running), TransitionData::immediate_to(3));
+    animation_graph.add_transition((v_idle, v_idle), TransitionData::wait());
+
+    // jumping up transitions
+    // immediately transitioning to the next state to the first frame of the segment.
+    animation_graph.add_transition((v_idle, v_jumping_up), TransitionData::immediate());
+    animation_graph.add_transition((v_running, v_jumping_up), TransitionData::immediate());
+
+    animation_graph.add_transition((v_jumping_up, v_jumping_up), TransitionData::wait());
+    animation_graph.add_transition((v_jumping_up, v_jumping_max), TransitionData::immediate());
+
+    // jumping max transitions
+    animation_graph.add_transition((v_jumping_max, v_jumping_max), TransitionData::wait());
+    animation_graph.add_transition((v_jumping_max, v_jumping_down), TransitionData::wait());
+
+    // jumping down transitions
+    animation_graph.add_transition((v_jumping_down, v_jumping_down), TransitionData::wait());
+    animation_graph.add_transition((v_jumping_down, v_rolling), TransitionData::immediate());
+    animation_graph.add_transition((v_jumping_down, v_landing), TransitionData::immediate());
+
+    // landing transitions
+    animation_graph.add_transition((v_landing, v_landing), TransitionData::wait());
+    animation_graph.add_transition((v_landing, v_jumping_up), TransitionData::immediate());
+    animation_graph.add_transition((v_landing, v_idle), TransitionData::wait());
+
+    animation_graph.add_transition((v_rolling, v_rolling), TransitionData::wait());
+    animation_graph.add_transition((v_rolling, v_running), TransitionData::wait_to(3));
+
+    // animation_graph.add_transition(
+    //     (v_landing, v_running),
+    //     TransitionData {
+    //         transition_behaviour: TransitionBehaviour::Immediate,
+    //         transition_to_index: 4,
+    //     },
+    // );
+    //
+    // walking transitions
+    // animation_graph.add_transition((v_walking, v_walking), TransitionData::wait());
+    // animation_graph.add_transition((v_walking, v_idle), TransitionData::wait());
+    // animation_graph.add_transition((v_walking, v_running), TransitionData::wait());
+    // animation_graph.add_transition((v_walking, v_jumping_up), TransitionData::immediate());
+
+    // // walking transitions
+    // animation_graph.add_transition((v_walking, v_idle), TransitionData::wait());
+    // animation_graph.add_transition((v_walking, v_walking), TransitionData::wait());
+    // animation_graph.add_transition((v_walking, v_running), TransitionData::wait());
+    // animation_graph.add_transition((v_walking, v_jumping_up), TransitionData::immediate());
+
+    // // running transitions
+    // animation_graph.add_transition((v_running, v_running), TransitionData::wait());
+    // animation_graph.add_transition((v_running, v_jumping_up), TransitionData::immediate());
+    // animation_graph.add_transition((v_running, v_walking), TransitionData::wait());
 
     world.insert_resource(animation_graph);
 }
@@ -88,6 +157,10 @@ pub struct PlayerAtlasResource {
     #[asset(texture_atlas(tile_size_x = 48., tile_size_y = 48., columns = 8, rows = 1,))]
     #[asset(path = "player_walking.png")]
     pub walking: Handle<TextureAtlas>,
+
+    #[asset(texture_atlas(tile_size_x = 48., tile_size_y = 48., columns = 7, rows = 1,))]
+    #[asset(path = "player_rolling.png")]
+    pub rolling: Handle<TextureAtlas>,
 
     #[asset(texture_atlas(tile_size_x = 48., tile_size_y = 48., columns = 8, rows = 1,))]
     #[asset(path = "player_running.png")]

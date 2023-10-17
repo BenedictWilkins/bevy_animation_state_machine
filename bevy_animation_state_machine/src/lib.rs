@@ -3,11 +3,11 @@ mod component;
 mod graph;
 mod system;
 
-mod graph2;
-
-pub use animation_graph::{LoopBehaviour, SpriteAnimationGraph, SpriteAnimationNode};
-pub use component::SpriteAnimation;
-pub use graph::Graph;
+pub use animation_graph::{
+    SegmentBehaviour, SegmentData, SegmentInterval, SpriteAnimationGraph, TransitionBehaviour,
+    TransitionData,
+};
+pub use component::{SpriteAnimation, SpriteAnimationBundle};
 
 pub use system::animation;
 
